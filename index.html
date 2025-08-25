@@ -17,36 +17,66 @@
   import { GLTFLoader } from 'https://unpkg.com/three@0.165.0/examples/jsm/loaders/GLTFLoader.js';
 
   const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
 
-  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 5000);
   camera.position.set(2, 2, 2);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
+  // 라이트
   scene.add(new THREE.AmbientLight(0xffffff, 0.8));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
   dirLight.position.set(5, 10, 7);
   scene.add(dirLight);
 
+  // GLB 로드 + 카메라 프레이밍
   const loader = new GLTFLoader();
   loader.load('scene.glb', (gltf) => {
-    scene.add(gltf.scene);
+    const root = gltf.scene;
+    // (선택) 그림자
+    root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    scene.add(root);
+
+    // ---- 프레이밍 ----
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    // 컨트롤 타깃을 모델 중심으로
+    controls.target.copy(center);
+
+    // 모델이 화면에 꽉 차도록 카메라 거리 계산
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let dist = (maxDim / 2) / Math.tan(fov / 2);
+    dist *= 1.4; // 여유
+
+    // 카메라 위치 재설정
+    camera.position.copy(center).add(new THREE.Vector3(dist, dist * 0.4, dist));
+    camera.near = Math.max(0.01, maxDim / 100);
+    camera.far  = Math.max(1000,  maxDim * 10);
+    camera.updateProjectionMatrix();
+    controls.update();
   }, undefined, (err) => {
     console.error('GLB 로드 실패:', err);
   });
 
+  // 리사이즈
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // 루프
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
@@ -56,3 +86,4 @@
 </script>
 </body>
 </html>
+
