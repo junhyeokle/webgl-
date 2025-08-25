@@ -1,0 +1,11 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0e0f11; /* 어두운 배경 */
+}
+#app {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
