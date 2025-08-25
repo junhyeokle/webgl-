@@ -2,111 +2,81 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Three.js GLB Viewer (No Module)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GLB Loader</title>
   <style>
-    html, body { margin:0; height:100%; overflow:hidden; background:#0e0f11; }
-    #c { width:100%; height:100%; display:block; }
-    .hud{position:fixed;left:12px;top:12px;padding:8px 10px;background:rgba(0,0,0,.5);color:#eee;border-radius:8px;font:12px/1.4 ui-sans-serif,system-ui;}
+    html,body { margin:0; height:100%; overflow:hidden; background:#0e0f11; }
+    canvas { width:100%; height:100%; display:block; }
   </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hud">마우스: 회전 · 휠: 줌 · 우클릭: 패닝</div>
 
-<!-- ✅ 전역 THREE 스크립트 (모듈 아님) -->
-<script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://unpkg.com/three@0.165.0/examples/js/loaders/GLTFLoader.js"></script>
+<script type="module">
+  import * as THREE from 'https://unpkg.com/three@0.165.0/build/three.module.js';
+  import { OrbitControls } from 'https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js';
+  import { GLTFLoader } from 'https://unpkg.com/three@0.165.0/examples/jsm/loaders/GLTFLoader.js';
 
-<script>
-  // Renderer
+  // 기본 셋업
   const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias:true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
-  // Scene / Camera / Controls
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0f11);
 
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 5000);
   camera.position.set(2.5, 1.6, 2.5);
 
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  // Light (밝게)
+  // 라이트
   scene.add(new THREE.AmbientLight(0xffffff, 0.9));
   const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(5, 10, 6);
   scene.add(dir);
 
-  // ✅ 렌더러/조명 확인용 테스트 큐브 (이게 보이면 기본 파이프라인 OK)
-  const testCube = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2,0.2,0.2),
-    new THREE.MeshStandardMaterial({ color: 0x44aa88, roughness: 0.6 })
-  );
-  testCube.position.set(0, 0.1, 0);
-  scene.add(testCube);
+  // 로더
+  const loader = new GLTFLoader();
+  const url = './assets/wraith.glb?v=' + Date.now(); // 캐시 무효화
 
-  // GLB 로드 (index.html과 같은 폴더의 scene.glb)
-  const loader = new THREE.GLTFLoader();
-  const url = 'scene.glb?v=' + Date.now(); // 캐시 무효화
-  fetch(url).then(r => {
-    console.log('[GLB] HTTP', r.status);
-    if (!r.ok) console.warn('→ scene.glb 경로/이름/배포 상태 확인 필요');
-    return r.arrayBuffer();
-  }).then(buf => {
-    loader.parse(buf, '', (gltf) => {
-      const root = gltf.scene;
-      let box = new THREE.Box3().setFromObject(root);
-      let size = box.getSize(new THREE.Vector3());
-      let center = box.getCenter(new THREE.Vector3());
+  loader.load(url, (glb) => {
+    const model = glb.scene;
+    model.scale.set(0.02, 0.02, 0.02);   // 네가 준 스케일 유지
+    model.traverse(o => {                // 면 뒤집힘 대비
+      if (o.isMesh && o.material) o.material.side = THREE.DoubleSide;
+    });
+    scene.add(model);
 
-      // 메시 설정 (면 뒤집힘 대비)
-      root.traverse(o => {
-        if (o.isMesh) {
-          o.castShadow = o.receiveShadow = true;
-          if (o.material) o.material.side = THREE.DoubleSide;
-        }
-      });
+    // ▲ 로드 후 카메라 프레이밍(여기가 제일 중요!)
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
 
-      // 너무 크거나/작으면 자동 스케일
-      let maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 1000 || maxDim < 0.001) {
-        const target = 2.5;
-        const scale = target / (maxDim || 1);
-        root.scale.setScalar(scale);
-        root.updateMatrixWorld(true);
-        box.setFromObject(root);
-        size = box.getSize(new THREE.Vector3());
-        center = box.getCenter(new THREE.Vector3());
-      }
+    controls.target.copy(center);
+    const fov = camera.fov * Math.PI/180;
+    let dist = (maxDim/2) / Math.tan(fov/2);
+    dist *= 1.4; // 여유
+    camera.position.copy(center).add(new THREE.Vector3(dist, dist*0.4, dist));
+    camera.near = Math.max(0.01, maxDim/100);
+    camera.far  = Math.max(1000,  maxDim*10);
+    camera.updateProjectionMatrix();
+    controls.update();
+  }, undefined, (err) => {
+    console.error('GLB load error:', err);
+  });
 
-      // 카메라 프레이밍
-      controls.target.copy(center);
-      const fov = camera.fov * Math.PI/180;
-      let dist = (Math.max(size.x,size.y,size.z) / 2) / Math.tan(fov/2);
-      dist *= 1.4;
-      camera.position.copy(center).add(new THREE.Vector3(dist, dist*0.4, dist));
-      camera.near = Math.max(0.01, Math.max(size.x,size.y,size.z)/100);
-      camera.far  = Math.max(1000,  Math.max(size.x,size.y,size.z)*10);
-      camera.updateProjectionMatrix();
-
-      scene.add(root);
-    }).catch(err => console.error('[GLB] parse error:', err));
-  }).catch(err => console.error('[GLB] fetch error:', err));
-
-  // Resize & Loop
+  // 리사이즈 & 루프
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
   (function tick(){
-    testCube.rotation.y += 0.01;
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
@@ -114,4 +84,3 @@
 </script>
 </body>
 </html>
-
